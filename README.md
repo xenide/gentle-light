@@ -119,3 +119,7 @@ cask "gentle-light" do
   app "GentleLight.app"
 end
 ```
+
+## License
+
+GPL-3.0-or-later. See [`LICENSE`](./LICENSE) for the full text. Forks and derivatives must remain open under the same license.
