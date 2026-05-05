@@ -15,7 +15,7 @@ final class DisplayController: ObservableObject {
     }
 
     @Published var overlayDim: Double = 0.0 {
-        didSet { applyOverlay() }
+        didSet { apply() }
     }
 
     @Published var enabled: Bool = true {
@@ -64,25 +64,32 @@ final class DisplayController: ObservableObject {
     func apply() {
         guard enabled else { return }
         let scalar = GammaCurve.scalar(forKelvin: kelvin)
-        let dim = Float(max(0.1, min(1.0, gammaBrightness)))
+        let gamma = Float(max(0.1, min(1.0, gammaBrightness)))
+        let extra = Float(1.0 - max(0, min(0.85, overlayDim)))
+        let combined = gamma * extra
+        let multR = scalar.red * combined
+        let multG = scalar.green * combined
+        let multB = scalar.blue * combined
         for displayID in onlineDisplays() {
             let err = CGSetDisplayTransferByFormula(
                 displayID,
-                0, scalar.red * dim, 1,
-                0, scalar.green * dim, 1,
-                0, scalar.blue * dim, 1
+                0, multR, 1,
+                0, multG, 1,
+                0, multB, 1
             )
             if err != .success {
                 NSLog("CGSetDisplayTransferByFormula failed for display \(displayID): \(err.rawValue)")
             }
         }
-        applyOverlay()
+        for overlay in overlays.values {
+            overlay.setMultiply(red: multR, green: multG, blue: multB)
+        }
     }
 
     func restoreSystemGamma() {
         CGDisplayRestoreColorSyncSettings()
         for overlay in overlays.values {
-            overlay.setDim(0)
+            overlay.setMultiply(red: 1, green: 1, blue: 1)
         }
     }
 
@@ -150,17 +157,11 @@ final class DisplayController: ObservableObject {
         }
     }
 
-    private func applyOverlay() {
-        let dim = Float(max(0, min(0.85, overlayDim)))
-        for overlay in overlays.values {
-            overlay.setDim(dim)
-        }
-    }
-
     private func rebuildOverlays() {
         var next: [CGDirectDisplayID: DimOverlayWindow] = [:]
         for screen in NSScreen.screens {
             guard let id = screen.displayID else { continue }
+            guard CGDisplayIsBuiltin(id) != 0 else { continue }
             if let existing = overlays[id] {
                 existing.reposition(to: screen)
                 next[id] = existing
