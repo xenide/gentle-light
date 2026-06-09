@@ -25,6 +25,7 @@ Swift Package executable. AppKit + SwiftUI hybrid. Runs as `.accessory` activati
 | `Sources/GentleLight/DisplayController.swift` | Singleton `ObservableObject`. Per-display gamma via `CGSetDisplayTransferByFormula`, overlay management, HW backlight pin + ambient-light disable, hot-plug via `CGDisplayRegisterReconfigurationCallback` |
 | `Sources/GentleLight/GammaCurve.swift` | Tanner Helland Kelvin → RGB scalar approximation (1000–10000 K) |
 | `Sources/GentleLight/HardwareBrightness.swift` | `dlopen` wrappers around private `DisplayServices` symbols: `Set/GetBrightness` and `Has/Enable/IsEnabled AmbientLightCompensation` |
+| `Sources/GentleLight/NightShift.swift` | objc-runtime wrapper around private `CoreBrightness` `CBBlueLightClient`: Night Shift strength/enabled get + set |
 | `Sources/GentleLight/DimOverlayWindow.swift` | Click-through full-screen `NSWindow` at `CGShieldingWindowLevel + 1` for sub-gamma-floor dim |
 | `Sources/GentleLight/SettingsView.swift` | SwiftUI popover: kelvin / gamma / overlay sliders + HW pin toggle |
 
@@ -37,6 +38,8 @@ Swift Package executable. AppKit + SwiftUI hybrid. Runs as `.accessory` activati
 - Auto-brightness disable while pinned (DisplayServices ambient-light compensation), restored on unpin
 - Multi-display via `CGGetOnlineDisplayList` (covers mirrored / AirPlay / Sidecar / sleeping externals)
 - Hot-plug + display-reconfiguration handling
+- Built-in panel fallback for the M5 gamma bug (see below): brightness routes through the black overlay on affected hardware
+- Optional "Tint via Night Shift" toggle: warms via `CBBlueLightClient` (reaches the built-in panel and the cursor; ~2700 K floor); while on, gamma carries brightness only so externals aren't double-warmed
 
 ## What's next
 
@@ -52,6 +55,9 @@ In roughly priority order:
 
 ## Non-obvious notes
 
+- **M5 gamma bug**: macOS 26 on M5 Pro/Max accepts `CGSetDisplayTransferBy*` writes (returns success, reads back correctly) but never applies them to the built-in panel — Apple bugs FB22273730 / FB22273782, still present in 26.5, breaks BetterDisplay/Lunar/f.lux too. `DisplayController.builtinGammaBroken` gates the fallback (built-in brightness via overlay) by CPU brand + OS major version; re-test after each macOS update and drop the gate when Apple fixes it.
+- **Overlay must stay pure black**: alpha compositing is `out = src·α + dst·(1−α)` — it can only add light, so per-channel multiply (tint) is impossible and any non-black overlay color lifts black pixels into a milky haze. Black src = exact uniform multiply.
+- **Cursor stays bright under overlay dimming**: macOS composites the cursor above `CGShieldingWindowLevel`; only gamma or hardware dimming affect it. Inherent to overlays — no window-level workaround exists. Night Shift tint does reach the cursor.
 - **Gamma vs overlay**: both are PWM-free. Gamma is preferred until ~30–50% perceived brightness — below that it causes color banding (256 levels squeezed into ~75). Overlay covers the rest. Tradeoff: the macOS cursor renders *above* the overlay and stays bright on a dim screen.
 - **HW pin uses a private framework** (`DisplayServices`). Stable since 10.15 and used by Lunar / MonitorControl / BetterDisplay. Cannot ship via App Store; fine for personal use.
 - **Signal cleanup is partial**: `SIGINT` / `SIGTERM` handlers only restore gamma — not HW backlight or ambient-light state — because `DisplayServices` calls aren't async-signal-safe. If brightness gets stuck at 100%, F1 fixes it instantly.

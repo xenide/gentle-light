@@ -9,7 +9,8 @@ final class DimOverlayWindow: NSWindow {
             defer: false
         )
         isOpaque = false
-        backgroundColor = .clear
+        backgroundColor = .black
+        alphaValue = 0
         ignoresMouseEvents = true
         level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()) + 1)
         collectionBehavior = [
@@ -19,7 +20,6 @@ final class DimOverlayWindow: NSWindow {
             .fullScreenAuxiliary,
         ]
         hasShadow = false
-        alphaValue = 0
         setFrame(screen.frame, display: true)
         orderFrontRegardless()
     }
@@ -27,20 +27,12 @@ final class DimOverlayWindow: NSWindow {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 
-    func setMultiply(red: Float, green: Float, blue: Float) {
-        let r = max(0, min(1, red))
-        let g = max(0, min(1, green))
-        let b = max(0, min(1, blue))
-        let avg = (r + g + b) / 3
-        let alpha = max(0, min(0.9, 1 - avg))
-        let dark: Float = 0.35
-        backgroundColor = NSColor(
-            red: CGFloat(r * dark),
-            green: CGFloat(g * dark),
-            blue: CGFloat(b * dark),
-            alpha: 1
-        )
-        alphaValue = CGFloat(alpha)
+    // Background must stay pure black: alpha compositing is out = src·α + dst·(1−α),
+    // so any non-black src lifts black pixels and reads as a milky haze. Black src
+    // makes the overlay an exact uniform multiply. Cap below 1 so the screen can't
+    // go fully opaque and unrecoverable.
+    func setDim(_ alpha: Float) {
+        animator().alphaValue = CGFloat(max(0, min(0.99, alpha)))
     }
 
     func reposition(to screen: NSScreen) {
