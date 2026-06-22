@@ -27,8 +27,12 @@ final class DimOverlayWindow: NSWindow {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 
-    func setDim(_ dim: Float) {
-        animator().alphaValue = CGFloat(max(0, min(0.85, dim)))
+    // Background must stay pure black: alpha compositing is out = src·α + dst·(1−α),
+    // so any non-black src lifts black pixels and reads as a milky haze. Black src
+    // makes the overlay an exact uniform multiply. Cap below 1 so the screen can't
+    // go fully opaque and unrecoverable.
+    func setDim(_ alpha: Float) {
+        animator().alphaValue = CGFloat(max(0, min(0.99, alpha)))
     }
 
     func reposition(to screen: NSScreen) {

@@ -33,6 +33,18 @@ struct SettingsView: View {
                     step: 100
                 )
                 .disabled(!controller.enabled)
+                if controller.isNightShiftAvailable {
+                    Toggle(isOn: $controller.nightShiftTint) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Tint via Night Shift")
+                            Text("Reaches the built-in panel and cursor; warms to ~2700 K max.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .toggleStyle(.switch)
+                    .disabled(!controller.enabled)
+                }
             }
 
             VStack(alignment: .leading, spacing: 4) {

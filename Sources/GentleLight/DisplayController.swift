@@ -15,11 +15,19 @@ final class DisplayController: ObservableObject {
     }
 
     @Published var overlayDim: Double = 0.0 {
-        didSet { applyOverlay() }
+        didSet { if enabled { applyOverlays() } }
     }
 
     @Published var enabled: Bool = true {
         didSet { enabled ? apply() : restoreSystemGamma() }
+    }
+
+    @Published var nightShiftTint: Bool = false {
+        didSet {
+            guard nightShiftTint != oldValue else { return }
+            nightShiftTint ? startNightShiftTint() : stopNightShiftTint()
+            apply()
+        }
     }
 
     @Published var pinHardwareToMax: Bool = false {
@@ -30,14 +38,32 @@ final class DisplayController: ObservableObject {
     }
 
     let isHardwarePinAvailable: Bool = HardwareBrightness.isAvailable
+    let isNightShiftAvailable: Bool = NightShift.isAvailable
 
     private var overlays: [CGDirectDisplayID: DimOverlayWindow] = [:]
     private var screenObserver: NSObjectProtocol?
     private var originalBacklight: [CGDirectDisplayID: Float] = [:]
     private var originalAmbientLight: [CGDirectDisplayID: Bool] = [:]
+    private var originalNightShift: (strength: Float, enabled: Bool)?
+    private var lastNightShiftStrength: Float?
     private var pinTimer: Timer?
     private static let pinTarget: Float = 1.0
     private static let pinTolerance: Float = 0.01
+
+    // macOS 26 on M5 Pro/Max accepts gamma-table writes but never applies them to the
+    // built-in panel (Apple bugs FB22273730 / FB22273782, still present in 26.5).
+    // While true, the built-in display's brightness routes through the black overlay
+    // instead, so gamma starting to work again can't double-dim it.
+    static let builtinGammaBroken: Bool = {
+        guard ProcessInfo.processInfo.operatingSystemVersion.majorVersion == 26 else { return false }
+        var size = 0
+        sysctlbyname("machdep.cpu.brand_string", nil, &size, nil, 0)
+        guard size > 0 else { return false }
+        var brand = [CChar](repeating: 0, count: size)
+        sysctlbyname("machdep.cpu.brand_string", &brand, &size, nil, 0)
+        let cpu = String(cString: brand)
+        return cpu.contains("M5 Pro") || cpu.contains("M5 Max")
+    }()
 
     private init() {
         registerDisplayReconfigurationCallback()
@@ -63,20 +89,25 @@ final class DisplayController: ObservableObject {
 
     func apply() {
         guard enabled else { return }
-        let scalar = GammaCurve.scalar(forKelvin: kelvin)
-        let dim = Float(max(0.1, min(1.0, gammaBrightness)))
+        if nightShiftTint {
+            applyNightShiftStrength()
+        }
+        let scalar = nightShiftTint
+            ? RGBScalar(red: 1, green: 1, blue: 1)
+            : GammaCurve.scalar(forKelvin: kelvin)
+        let gamma = Float(max(0.1, min(1.0, gammaBrightness)))
         for displayID in onlineDisplays() {
             let err = CGSetDisplayTransferByFormula(
                 displayID,
-                0, scalar.red * dim, 1,
-                0, scalar.green * dim, 1,
-                0, scalar.blue * dim, 1
+                0, scalar.red * gamma, 1,
+                0, scalar.green * gamma, 1,
+                0, scalar.blue * gamma, 1
             )
             if err != .success {
                 NSLog("CGSetDisplayTransferByFormula failed for display \(displayID): \(err.rawValue)")
             }
         }
-        applyOverlay()
+        applyOverlays()
     }
 
     func restoreSystemGamma() {
@@ -84,13 +115,21 @@ final class DisplayController: ObservableObject {
         for overlay in overlays.values {
             overlay.setDim(0)
         }
+        if let original = originalNightShift {
+            NightShift.setStrength(original.strength)
+            NightShift.setEnabled(original.enabled)
+            lastNightShiftStrength = nil
+        }
     }
 
     func shutdown() {
         if pinHardwareToMax {
             pinHardwareToMax = false
         }
-        restoreSystemGamma()
+        enabled = false
+        if nightShiftTint {
+            nightShiftTint = false
+        }
     }
 
     private func startBacklightPin() {
@@ -150,11 +189,42 @@ final class DisplayController: ObservableObject {
         }
     }
 
-    private func applyOverlay() {
-        let dim = Float(max(0, min(0.85, overlayDim)))
-        for overlay in overlays.values {
-            overlay.setDim(dim)
+    private func applyOverlays() {
+        let overlay = Float(max(0, min(0.85, overlayDim)))
+        let gamma = Float(max(0.1, min(1.0, gammaBrightness)))
+        for (displayID, window) in overlays {
+            let gammaFallback = Self.builtinGammaBroken && CGDisplayIsBuiltin(displayID) != 0
+            let alpha = gammaFallback ? 1 - gamma * (1 - overlay) : overlay
+            window.setDim(alpha)
         }
+    }
+
+    private func startNightShiftTint() {
+        guard NightShift.isAvailable else {
+            nightShiftTint = false
+            return
+        }
+        if originalNightShift == nil,
+           let strength = NightShift.strength(),
+           let isEnabled = NightShift.isEnabled() {
+            originalNightShift = (strength, isEnabled)
+        }
+    }
+
+    private func stopNightShiftTint() {
+        guard let original = originalNightShift else { return }
+        NightShift.setStrength(original.strength)
+        NightShift.setEnabled(original.enabled)
+        originalNightShift = nil
+        lastNightShiftStrength = nil
+    }
+
+    private func applyNightShiftStrength() {
+        let strength = NightShift.strength(forKelvin: kelvin)
+        guard strength != lastNightShiftStrength else { return }
+        lastNightShiftStrength = strength
+        NightShift.setStrength(strength)
+        NightShift.setEnabled(strength > 0)
     }
 
     private func rebuildOverlays() {
