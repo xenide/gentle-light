@@ -27,6 +27,7 @@ Swift Package executable. AppKit + SwiftUI hybrid. Runs as `.accessory` activati
 | `Sources/GentleLight/HardwareBrightness.swift` | `dlopen` wrappers around private `DisplayServices` symbols: `Set/GetBrightness` and `Has/Enable/IsEnabled AmbientLightCompensation` |
 | `Sources/GentleLight/NightShift.swift` | objc-runtime wrapper around private `CoreBrightness` `CBBlueLightClient`: Night Shift strength/enabled get + set |
 | `Sources/GentleLight/DimOverlayWindow.swift` | Click-through full-screen `NSWindow` at `CGShieldingWindowLevel + 1` for sub-gamma-floor dim |
+| `Sources/GentleLight/Dithering.swift` | Disables GPU/DCP temporal dithering (`enableDither`) + edge `uniformity2D` via `IORegistryEntrySetCFProperty` on `IOMobileFramebufferAP` services (Apple silicon) |
 | `Sources/GentleLight/SettingsView.swift` | SwiftUI popover: kelvin / gamma / overlay sliders + HW pin toggle |
 
 ## What's done
@@ -40,6 +41,7 @@ Swift Package executable. AppKit + SwiftUI hybrid. Runs as `.accessory` activati
 - Hot-plug + display-reconfiguration handling
 - Built-in panel fallback for the M5 gamma bug (see below): brightness routes through the black overlay on affected hardware
 - Optional "Tint via Night Shift" toggle: warms via `CBBlueLightClient` (reaches the built-in panel and the cursor; ~2700 K floor); while on, gamma carries brightness only so externals aren't double-warmed
+- Disable temporal dithering (`enableDither`) + experimental edge `uniformity2D` via IOKit framebuffer writes, re-applied on hot-plug (technique ported from Stillcolor; Apple silicon only)
 
 ## What's next
 
@@ -50,8 +52,7 @@ In roughly priority order:
 3. Global hotkeys for brightness ± / kelvin ±
 4. Sunrise/sunset schedule for auto-warming
 5. Per-display independent settings
-6. Disable temporal dithering (the *other* macOS eye-strain trigger; needs IOMobileFramebuffer registers — see BetterDisplay)
-7. Package as a proper `.app` bundle with `Info.plist`, code signing, launch-at-login (see `README.md`)
+6. Package as a proper `.app` bundle with `Info.plist`, code signing, launch-at-login (see `README.md`)
 
 ## Non-obvious notes
 
@@ -61,7 +62,7 @@ In roughly priority order:
 - **Gamma vs overlay**: both are PWM-free. Gamma is preferred until ~30–50% perceived brightness — below that it causes color banding (256 levels squeezed into ~75). Overlay covers the rest. Tradeoff: the macOS cursor renders *above* the overlay and stays bright on a dim screen.
 - **HW pin uses a private framework** (`DisplayServices`). Stable since 10.15 and used by Lunar / MonitorControl / BetterDisplay. Cannot ship via App Store; fine for personal use.
 - **Signal cleanup is partial**: `SIGINT` / `SIGTERM` handlers only restore gamma — not HW backlight or ambient-light state — because `DisplayServices` calls aren't async-signal-safe. If brightness gets stuck at 100%, F1 fixes it instantly.
-- **Dithering is separate**: this app does not address temporal dithering, which a subset of PWM-sensitive users also react to. BetterDisplay is the reference tool there.
+- **Dithering write resets on reconfiguration**: `enableDither` lives on the IOKit framebuffer and reverts to `Yes` on restart (and per-display on hot-plug), so `DisplayController.reapplyDithering()` re-writes it from the `CGDisplayRegisterReconfigurationCallback`. No restore-on-quit — leaving dithering off is the desired state. Default off (opt-in); toggling off writes `enableDither = Yes` back. Apple silicon only (`IOMobileFramebufferAP`); the toggle is disabled on Intel. TCON/panel-level dithering is out of scope — see Stillcolor's caveats.
 
 ## References
 
