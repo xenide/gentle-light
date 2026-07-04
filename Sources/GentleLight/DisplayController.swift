@@ -37,8 +37,23 @@ final class DisplayController: ObservableObject {
         }
     }
 
+    @Published var disableDithering: Bool = false {
+        didSet {
+            guard disableDithering != oldValue else { return }
+            Dithering.setDithering(disabled: disableDithering)
+        }
+    }
+
+    @Published var disableUniformity2D: Bool = false {
+        didSet {
+            guard disableUniformity2D != oldValue else { return }
+            Dithering.setUniformity2D(disabled: disableUniformity2D)
+        }
+    }
+
     let isHardwarePinAvailable: Bool = HardwareBrightness.isAvailable
     let isNightShiftAvailable: Bool = NightShift.isAvailable
+    let isDitheringAvailable: Bool = Dithering.isAvailable
 
     private var overlays: [CGDirectDisplayID: DimOverlayWindow] = [:]
     private var screenObserver: NSObjectProtocol?
@@ -252,6 +267,11 @@ final class DisplayController: ObservableObject {
         return Array(ids.prefix(Int(count)))
     }
 
+    private func reapplyDithering() {
+        if disableDithering { Dithering.setDithering(disabled: true) }
+        if disableUniformity2D { Dithering.setUniformity2D(disabled: true) }
+    }
+
     private func registerDisplayReconfigurationCallback() {
         let context = Unmanaged.passUnretained(self).toOpaque()
         CGDisplayRegisterReconfigurationCallback({ _, flags, ctx in
@@ -262,6 +282,7 @@ final class DisplayController: ObservableObject {
                 Task { @MainActor in
                     me.rebuildOverlays()
                     me.apply()
+                    me.reapplyDithering()
                 }
             }
         }, context)

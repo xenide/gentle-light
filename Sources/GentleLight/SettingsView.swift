@@ -88,6 +88,32 @@ struct SettingsView: View {
 
             Divider()
 
+            Toggle(isOn: $controller.disableDithering) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Disable temporal dithering")
+                    Text(controller.isDitheringAvailable
+                         ? "Stops GPU dithering (FRC) on all displays. Resets on restart."
+                         : "Requires an Apple silicon Mac.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .toggleStyle(.switch)
+            .disabled(!controller.isDitheringAvailable)
+
+            Toggle(isOn: $controller.disableUniformity2D) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Disable edge uniformity")
+                    Text("Experimental: stops the built-in panel dimming near the edges.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .toggleStyle(.switch)
+            .disabled(!controller.isDitheringAvailable)
+
+            Divider()
+
             HStack {
                 Button("Reset") {
                     controller.kelvin = GammaCurve.neutralKelvin
