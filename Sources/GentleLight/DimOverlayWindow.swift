@@ -22,6 +22,7 @@ final class DimOverlayWindow: NSWindow {
         hasShadow = false
         setFrame(screen.frame, display: true)
         orderFrontRegardless()
+        OverlaySpace.add(self)
     }
 
     override var canBecomeKey: Bool { false }

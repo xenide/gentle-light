@@ -27,6 +27,7 @@ Swift Package executable. AppKit + SwiftUI hybrid. Runs as `.accessory` activati
 | `Sources/GentleLight/HardwareBrightness.swift` | `dlopen` wrappers around private `DisplayServices` symbols: `Set/GetBrightness` and `Has/Enable/IsEnabled AmbientLightCompensation` |
 | `Sources/GentleLight/NightShift.swift` | objc-runtime wrapper around private `CoreBrightness` `CBBlueLightClient`: Night Shift strength/enabled get + set |
 | `Sources/GentleLight/DimOverlayWindow.swift` | Click-through full-screen `NSWindow` at `CGShieldingWindowLevel + 1` for sub-gamma-floor dim |
+| `Sources/GentleLight/OverlaySpace.swift` | `dlopen` wrappers around private `SkyLight` CGS-space calls: floating space (absolute level 400) hosting the dim overlays so Mission Control / space transitions can't composite above them |
 | `Sources/GentleLight/Dithering.swift` | Disables GPU/DCP temporal dithering (`enableDither`) + edge `uniformity2D` via `IORegistryEntrySetCFProperty` on `IOMobileFramebufferAP` services (Apple silicon) |
 | `Sources/GentleLight/SettingsView.swift` | SwiftUI popover: kelvin / gamma / overlay sliders + HW pin toggle |
 
@@ -42,6 +43,7 @@ Swift Package executable. AppKit + SwiftUI hybrid. Runs as `.accessory` activati
 - Built-in panel fallback for the M5 gamma bug (see below): brightness routes through the black overlay on affected hardware
 - Optional "Tint via Night Shift" toggle: warms via `CBBlueLightClient` (reaches the built-in panel and the cursor; ~2700 K floor); while on, gamma carries brightness only so externals aren't double-warmed
 - Disable temporal dithering (`enableDither`) + experimental edge `uniformity2D` via IOKit framebuffer writes, re-applied on hot-plug (technique ported from Stillcolor; Apple silicon only)
+- Overlay dimming holds through Mission Control and space-switch animations (overlays live in a private floating SkyLight space — see below)
 
 ## What's next
 
@@ -59,6 +61,7 @@ In roughly priority order:
 - **M5 gamma bug**: macOS 26 on M5 Pro/Max accepts `CGSetDisplayTransferBy*` writes (returns success, reads back correctly) but never applies them to the built-in panel — Apple bugs FB22273730 / FB22273782, still present in 26.5, breaks BetterDisplay/Lunar/f.lux too. `DisplayController.builtinGammaBroken` gates the fallback (built-in brightness via overlay) by CPU brand + OS major version; re-test after each macOS update and drop the gate when Apple fixes it.
 - **Overlay must stay pure black**: alpha compositing is `out = src·α + dst·(1−α)` — it can only add light, so per-channel multiply (tint) is impossible and any non-black overlay color lifts black pixels into a milky haze. Black src = exact uniform multiply.
 - **Cursor stays bright under overlay dimming**: macOS composites the cursor above `CGShieldingWindowLevel`; only gamma or hardware dimming affect it. Inherent to overlays — no window-level workaround exists. Night Shift tint does reach the cursor.
+- **Mission Control un-dims ordinary overlay windows**: during MC open/close and space-slide animations the window server orders the Dock's full-screen transition canvas above every ordinary window regardless of window level (observed on macOS 26.5: Dock window at level 20 composites above shielding+1 for ~250 ms — the "dock flashes bright" bug). Window level can't fix it; `OverlaySpace` moves each overlay into a private floating CGS space at absolute level 400 via `SLSSpaceAddWindowsAndRemoveFromSpaces` (SkyLight; absolute levels: 0 user spaces, 300 lock screen, 400 Notification Center at lock, 600 VoiceOver). Side effect: the overlay now also dims the in-session lock screen — desirable for PWM purposes. The SLS space calls return no usable value (register noise); verify membership with `SLSCopySpacesForWindows` selector 15 — the only selector that reports floating-space membership.
 - **Gamma vs overlay**: both are PWM-free. Gamma is preferred until ~30–50% perceived brightness — below that it causes color banding (256 levels squeezed into ~75). Overlay covers the rest. Tradeoff: the macOS cursor renders *above* the overlay and stays bright on a dim screen.
 - **HW pin uses a private framework** (`DisplayServices`). Stable since 10.15 and used by Lunar / MonitorControl / BetterDisplay. Cannot ship via App Store; fine for personal use.
 - **Signal cleanup is partial**: `SIGINT` / `SIGTERM` handlers only restore gamma — not HW backlight or ambient-light state — because `DisplayServices` calls aren't async-signal-safe. If brightness gets stuck at 100%, F1 fixes it instantly.

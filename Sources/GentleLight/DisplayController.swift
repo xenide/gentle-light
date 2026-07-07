@@ -145,6 +145,7 @@ final class DisplayController: ObservableObject {
         if nightShiftTint {
             nightShiftTint = false
         }
+        OverlaySpace.destroy()
     }
 
     private func startBacklightPin() {
