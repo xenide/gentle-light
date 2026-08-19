@@ -66,7 +66,7 @@ final class DisplayController: ObservableObject {
     private static let pinTolerance: Float = 0.01
 
     // macOS 26 on M5 Pro/Max accepts gamma-table writes but never applies them to the
-    // built-in panel (Apple bugs FB22273730 / FB22273782, still present in 26.5).
+    // built-in panel (Apple bugs FB22273730 / FB22273782, still present in 26.6.2).
     // While true, the built-in display's brightness routes through the black overlay
     // instead, so gamma starting to work again can't double-dim it.
     static let builtinGammaBroken: Bool = {
