@@ -62,8 +62,14 @@ final class DisplayController: ObservableObject {
     private var originalNightShift: (strength: Float, enabled: Bool)?
     private var lastNightShiftStrength: Float?
     private var pinTimer: Timer?
+    private var wakeObserver: NSObjectProtocol?
+    private var framebufferWatcher: FramebufferWatcher?
+    private var ditherRetryTimer: Timer?
+    private var ditherRetryCount = 0
     private static let pinTarget: Float = 1.0
     private static let pinTolerance: Float = 0.01
+    private static let ditherRetryLimit = 5
+    private static let ditherRetryInterval: TimeInterval = 2.0
 
     // macOS 26 on M5 Pro/Max accepts gamma-table writes but never applies them to the
     // built-in panel (Apple bugs FB22273730 / FB22273782, still present in 26.7).
@@ -82,6 +88,8 @@ final class DisplayController: ObservableObject {
 
     private init() {
         registerDisplayReconfigurationCallback()
+        registerFramebufferWatcher()
+        registerWakeObserver()
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil,
@@ -99,6 +107,9 @@ final class DisplayController: ObservableObject {
     deinit {
         if let token = screenObserver {
             NotificationCenter.default.removeObserver(token)
+        }
+        if let token = wakeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(token)
         }
     }
 
@@ -268,9 +279,56 @@ final class DisplayController: ObservableObject {
         return Array(ids.prefix(Int(count)))
     }
 
+    // The DCP can still be coming up when the first re-write lands, so keep re-asserting
+    // until a read-back confirms it or the window closes.
     private func reapplyDithering() {
-        if disableDithering { Dithering.setDithering(disabled: true) }
-        if disableUniformity2D { Dithering.setUniformity2D(disabled: true) }
+        ditherRetryTimer?.invalidate()
+        ditherRetryTimer = nil
+        ditherRetryCount = 0
+        guard disableDithering || disableUniformity2D, !assertDithering() else { return }
+        ditherRetryTimer = Timer.scheduledTimer(
+            withTimeInterval: Self.ditherRetryInterval, repeats: true
+        ) { [weak self] _ in
+            Task { @MainActor in self?.retryDithering() }
+        }
+    }
+
+    private func retryDithering() {
+        ditherRetryCount += 1
+        let applied = assertDithering()
+        guard applied || ditherRetryCount >= Self.ditherRetryLimit else { return }
+        if !applied {
+            NSLog("Dithering: gave up re-applying after \(ditherRetryCount) attempts")
+        }
+        ditherRetryTimer?.invalidate()
+        ditherRetryTimer = nil
+    }
+
+    private func assertDithering() -> Bool {
+        var applied = true
+        if disableDithering {
+            applied = Dithering.setDithering(disabled: true, force: true) && applied
+        }
+        if disableUniformity2D {
+            applied = Dithering.setUniformity2D(disabled: true, force: true) && applied
+        }
+        return applied
+    }
+
+    private func registerFramebufferWatcher() {
+        guard Dithering.isAvailable else { return }
+        framebufferWatcher = FramebufferWatcher { [weak self] in
+            Task { @MainActor in self?.reapplyDithering() }
+        }
+    }
+
+    // Covers a resume that reuses the existing framebuffer services, where no match fires.
+    private func registerWakeObserver() {
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.reapplyDithering() }
+        }
     }
 
     private func registerDisplayReconfigurationCallback() {
