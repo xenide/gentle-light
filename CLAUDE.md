@@ -28,7 +28,7 @@ Swift Package executable. AppKit + SwiftUI hybrid. Runs as `.accessory` activati
 | `Sources/GentleLight/NightShift.swift` | objc-runtime wrapper around private `CoreBrightness` `CBBlueLightClient`: Night Shift strength/enabled get + set |
 | `Sources/GentleLight/DimOverlayWindow.swift` | Click-through full-screen `NSWindow` at `CGShieldingWindowLevel + 1` for sub-gamma-floor dim |
 | `Sources/GentleLight/OverlaySpace.swift` | `dlopen` wrappers around private `SkyLight` CGS-space calls: floating space (absolute level 400) hosting the dim overlays so Mission Control / space transitions can't composite above them |
-| `Sources/GentleLight/Dithering.swift` | Disables GPU/DCP temporal dithering (`enableDither`) + edge `uniformity2D` via `IORegistryEntrySetCFProperty` on `IOMobileFramebufferAP` services (Apple silicon) |
+| `Sources/GentleLight/Dithering.swift` | Disables GPU/DCP temporal dithering (`enableDither`) + edge `uniformity2D` via `IORegistryEntrySetCFProperty` on `IOMobileFramebufferAP` services (Apple silicon). Also hosts `FramebufferWatcher`, the `kIOFirstMatchNotification` hook that reports each framebuffer service as it (re)registers |
 | `Sources/GentleLight/SettingsView.swift` | SwiftUI popover: kelvin / gamma / overlay sliders + HW pin toggle |
 
 ## What's done
@@ -42,7 +42,7 @@ Swift Package executable. AppKit + SwiftUI hybrid. Runs as `.accessory` activati
 - Hot-plug + display-reconfiguration handling
 - Built-in panel fallback for the M5 gamma bug (see below): brightness routes through the black overlay on affected hardware
 - Optional "Tint via Night Shift" toggle: warms via `CBBlueLightClient` (reaches the built-in panel and the cursor; ~2700 K floor); while on, gamma carries brightness only so externals aren't double-warmed
-- Disable temporal dithering (`enableDither`) + experimental edge `uniformity2D` via IOKit framebuffer writes, re-applied on hot-plug (technique ported from Stillcolor; Apple silicon only)
+- Disable temporal dithering (`enableDither`) + experimental edge `uniformity2D` via IOKit framebuffer writes, re-applied on hot-plug and on wake from sleep / hibernate (technique ported from Stillcolor; Apple silicon only)
 - Overlay dimming holds through Mission Control and space-switch animations (overlays live in a private floating SkyLight space — see below)
 
 ## What's next
@@ -65,7 +65,9 @@ In roughly priority order:
 - **Gamma vs overlay**: both are PWM-free. Gamma is preferred until ~30–50% perceived brightness — below that it causes color banding (256 levels squeezed into ~75). Overlay covers the rest. Tradeoff: the macOS cursor renders *above* the overlay and stays bright on a dim screen.
 - **HW pin uses a private framework** (`DisplayServices`). Stable since 10.15 and used by Lunar / MonitorControl / BetterDisplay. Cannot ship via App Store; fine for personal use.
 - **Signal cleanup is partial**: `SIGINT` / `SIGTERM` handlers only restore gamma — not HW backlight or ambient-light state — because `DisplayServices` calls aren't async-signal-safe. If brightness gets stuck at 100%, F1 fixes it instantly.
-- **Dithering write resets on reconfiguration**: `enableDither` lives on the IOKit framebuffer and reverts to `Yes` on restart (and per-display on hot-plug), so `DisplayController.reapplyDithering()` re-writes it from the `CGDisplayRegisterReconfigurationCallback`. No restore-on-quit — leaving dithering off is the desired state. Default off (opt-in); toggling off writes `enableDither = Yes` back. Apple silicon only (`IOMobileFramebufferAP`); the toggle is disabled on Intel. TCON/panel-level dithering is out of scope — see Stillcolor's caveats.
+- **Dithering write resets on reconfiguration**: `enableDither` lives on the IOKit framebuffer and reverts to `Yes` on restart (and per-display on hot-plug), so `DisplayController.reapplyDithering()` re-writes it. No restore-on-quit — leaving dithering off is the desired state. Default off (opt-in); toggling off writes `enableDither = Yes` back. Apple silicon only (`IOMobileFramebufferAP`); the toggle is disabled on Intel. TCON/panel-level dithering is out of scope — see Stillcolor's caveats.
+- **Wake from hibernate rebuilds the DCP**: with `hibernatemode 25` / `standby 1` the resume path tears down every `IOMobileFramebufferShim` and publishes fresh services at default properties, so dithering comes back on. `CGDisplayRegisterReconfigurationCallback` is the wrong hook — it fires before the replacements register, so the re-write lands on the doomed service. `FramebufferWatcher` uses `IOServiceAddMatchingNotification` + `kIOFirstMatchNotification` instead, which hands back each new service once its driver has matched; `NSWorkspace.didWakeNotification` backstops a resume that reuses the existing services. The returned iterator must be drained to empty or the notification never arms, and must be kept alive — releasing it cancels the subscription. Several callbacks arrive per wake (one or more per service); `reapplyDithering()` restarts its retry timer each time, which coalesces them.
+- **Dithering re-writes are forced and verified**: on the reapply path the equality short-circuit in `Dithering.write` is bypassed, because the registry can read back the desired value while the DCP has reverted internally — trusting the read would silently skip the fix. Each write is confirmed by re-reading the property, and `reapplyDithering()` retries every 2 s up to 5 times so a DCP that is still coming up doesn't drop the write. The `forcing … although it already reads correct` log line tells you which of the two failure modes a given wake hit.
 
 ## References
 
