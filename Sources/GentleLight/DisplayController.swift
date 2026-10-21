@@ -71,12 +71,12 @@ final class DisplayController: ObservableObject {
     private static let ditherRetryLimit = 5
     private static let ditherRetryInterval: TimeInterval = 2.0
 
-    // macOS 26 on M5 Pro/Max accepts gamma-table writes but never applies them to the
-    // built-in panel (Apple bugs FB22273730 / FB22273782, still present in 26.7).
+    // macOS 26+ on M5 Pro/Max accepts gamma-table writes but never applies them to the
+    // built-in panel (Apple bugs FB22273730 / FB22273782, still present in 27.0.1).
     // While true, the built-in display's brightness routes through the black overlay
     // instead, so gamma starting to work again can't double-dim it.
     static let builtinGammaBroken: Bool = {
-        guard ProcessInfo.processInfo.operatingSystemVersion.majorVersion == 26 else { return false }
+        guard ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 26 else { return false }
         var size = 0
         sysctlbyname("machdep.cpu.brand_string", nil, &size, nil, 0)
         guard size > 0 else { return false }
