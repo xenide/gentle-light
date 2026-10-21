@@ -1,7 +1,7 @@
 import Foundation
 
 // Private CoreBrightness API (CBBlueLightClient) — the engine behind Night Shift.
-// macOS 26 on M5 Pro/Max ignores gamma-table writes for the built-in panel
+// macOS 26+ on M5 Pro/Max ignores gamma-table writes for the built-in panel
 // (FB22273730); Night Shift's tint path still works there and also warms the
 // hardware cursor, which no overlay window can reach.
 @MainActor
